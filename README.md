@@ -20,13 +20,11 @@ And the name of output file will be the origin name of input file.
     Origin: 123_origin.pcap
     Repaired: 123.pcap
 
-
 If rename fuction is off(not compiled by VS), the output file name will be the name which add "_integrated" affer the origin input file name.
 
 And the name of origin file will not be changed.
+
     Ex.  
     Input: 123.pcap
     Origin: 123.pcap
     Repaired: 123_integrated.pcap
-
->Repaired: 123_integrated.pcap
