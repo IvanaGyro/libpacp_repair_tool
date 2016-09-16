@@ -3,6 +3,7 @@
 #include <sstream>
 #include <string>
 #include <ctime>
+#include <cstdio>
 
 
 #define HeaderBytes 24
@@ -67,6 +68,15 @@ int main(int argc, char** argv){
 		return 1;
 	}
 
+	outFileName = inFileName;
+	outFileName.insert(outFileName.rfind('.'), "_integrated");
+	fs_out.open(outFileName, ios::binary | ios::out);
+	if (!fs_out){
+		cout << "Can't open the file: " << outFileName << endl;
+		return 1;
+		
+	}
+
 
 	fs_in.seekg(0, fs_in.end);
 	int fs_in_size = fs_in.tellg();
@@ -85,7 +95,7 @@ int main(int argc, char** argv){
 		StartTime += StartTimeOffset;
 		fs_in.seekg(-4, ios_base::cur);
 	}
-
+	cout << "start" << endl;
 	while (fs_in.get(buf_char)){
 		//cout << "in first while" << endl;
 		fs_in.seekg(-1, ios_base::cur);
@@ -113,6 +123,13 @@ int main(int argc, char** argv){
 				/*write last packetage data*/
 				//fs_out.write(buf_pkg[lastPkgIdx].data, buf_pkg[lastPkgIdx].size);
 				outBuf.write(buf_pkg[lastPkgIdx].data, buf_pkg[lastPkgIdx].size);
+				if (outBuf.tellp() >= 0x7fffffff - MaxPkgBytes)
+				{
+					cout << "write" << endl;
+					fs_out << outBuf.rdbuf();
+					outBuf.str("");
+					outBuf.clear();
+				}
 				/*write last packetage data*/
 
 				/*swap idx of buffer*/
@@ -140,37 +157,62 @@ int main(int argc, char** argv){
 	}
 	fs_in.close();
 
+	mytime = clock() - mytime;
+	cout << "Repair pacp: " << mytime << " miniseconds." << endl;
+	cout << "Number of deleted headers: " << headercount << endl;
+
+
+	mytime = clock();
+
 	if (headercount || isBroken){
-		outFileName = inFileName;
+		fs_out << outBuf.rdbuf();
+		fs_out.close();
 #ifdef _MSC_VER
 		wstring originFileName, newFileName;
 		originFileName = str2wstr(inFileName);
 		newFileName = str2wstr(inFileName.insert(inFileName.rfind("."), "_origin"));
+
 		int flag = MoveFileExW(originFileName.c_str(), newFileName.c_str(), 0);
-		if (!flag){
+		if (!flag)
+		{
 			cout << "fail to rename origin file" << endl;
 			cout << showbase // show the 0x prefix
 				<< internal // fill between the prefix and the number
 				<< setfill('0'); // fill with 0s
 			cout << "Error code: " << hex << setw(4) << GetLastError() << dec << endl;
-			outFileName.insert(outFileName.rfind('.'), "_integrated");
 		}
-#else 
-		outFileName.insert(outFileName.rfind('.'), "_integrated");
+		else
+		{
+			newFileName = originFileName;
+			originFileName = str2wstr(outFileName);
+			flag = MoveFileExW(originFileName.c_str(), newFileName.c_str(), 0);
+			if (!flag)
+			{
+				cout << "fail to rename output file" << endl;
+				cout << showbase // show the 0x prefix
+					<< internal // fill between the prefix and the number
+					<< setfill('0'); // fill with 0s
+				cout << "Error code: " << hex << setw(4) << GetLastError() << dec << endl;
+			}
+		}
+
 #endif //_MSC_VER 		
-		fs_out.open(outFileName, ios::binary | ios::out);
-		if (fs_out){
-			fs_out << outBuf.rdbuf();
-		}
+
 	}
-	else{
+	else
+	{
+		wstring tmpwstr = str2wstr(outFileName);
+		fs_out.close();
+		if (!DeleteFileW(tmpwstr.c_str()))
+		{
+			cout << "Cannot deleted tmp file (integrated)" << endl;
+		}
 		cout << "The file is completed. Do nothing." << endl;
 	}
 
 	mytime = clock() - mytime;
-	cout << "Use: " << mytime << " miniseconds." << endl;
-	cout << "Number of deleted headers: " << headercount << endl;
-	system("Pause"); 
+	cout << "Rename file: " << mytime << " miniseconds." << endl;
+	system("pause"); 
 	return 0;
 
 }
