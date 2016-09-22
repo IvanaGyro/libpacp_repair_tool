@@ -1,5 +1,6 @@
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <ctime>
 #include <cstdio>
@@ -9,20 +10,13 @@
 #define KeepDays 7
 #define KeepSeconds (KeepDays*86400)
 #define StartTimeOffset (-1*86400)  // -1 day
-#define MaxBufSize (1024*1024*1024) // 1 GB
 
 using namespace std;
 
-struct charArr{
-	charArr(){}
-	charArr(int initSize){ data = new char[initSize]; }
-	int size = 0;
-	char *data;
-};
-
-struct pkg : charArr{
-	pkg(){ data = new char[MaxPkgBytes]; }
-};
+typedef struct{
+	int size;
+	char data[MaxPkgBytes];
+}pkg;
 
 int catoi(const char* ca){
 	char tmp[4];
@@ -47,21 +41,19 @@ wstring str2wstr(const std::string& s)
 	wstring wstr(buf);
 	return wstr;
 }
-#else
-#define memcpy_s(dest,destSize,src,count) memcpy(dest, src, count)
 #endif // _MSC_VER
 
 
 int main(int argc, char** argv){
 	string inFileName, outFileName;
+	stringstream outBuf;
 	fstream fs_in, fs_out;
 	char buf_char;
 	int buf_int, headercount = 0, curPkgIdx= 0, lastPkgIdx = 1, tmp;
-	bool isBroken = false, isValid, isHeader;
+	bool isBroken = false, isValid;
 	clock_t mytime;
 	unsigned int StartTime = 0, PkgTime;
 	pkg buf_pkg[2];
-	charArr outBuf(MaxBufSize);
 
 	if (argc != 2){
 		return 1;
@@ -74,9 +66,6 @@ int main(int argc, char** argv){
 		cout << "Can't open the file: " << inFileName << endl;
 		return 1;
 	}
-	fs_in.seekg(0, fs_in.end);
-	cout << "input file size: " << fs_in.tellg() << endl;
-	fs_in.seekg(0, fs_in.beg);
 
 	outFileName = inFileName;
 	outFileName.insert(outFileName.rfind('.'), "_integrated");
@@ -84,6 +73,7 @@ int main(int argc, char** argv){
 	if (!fs_out){
 		cout << "Can't open the file: " << outFileName << endl;
 		return 1;
+		
 	}
 
 
@@ -96,8 +86,7 @@ int main(int argc, char** argv){
 
 	mytime = clock();
 	fs_in.read(buf_pkg[curPkgIdx].data, HeaderBytes);
-	memcpy_s(outBuf.data + outBuf.size, MaxBufSize - outBuf.size, buf_pkg[curPkgIdx].data, HeaderBytes);
-	outBuf.size += HeaderBytes;
+	outBuf.write(buf_pkg[curPkgIdx].data, HeaderBytes);
 	if (fs_in){
 		fs_in.read(buf_pkg[curPkgIdx].data, 4);
 		StartTime = catoi(buf_pkg[curPkgIdx].data);
@@ -112,16 +101,10 @@ int main(int argc, char** argv){
  			if (buf_int == 0xd4c3b2a1){  //a1b2 c3d4
 				fs_in.seekg(HeaderBytes-4, ios_base::cur);
 				headercount++;
-				isHeader = true;
 			}
-			else
-			{
-				fs_in.seekg(-4, ios_base::cur);
-				isHeader = false;
-			}
+			else fs_in.seekg(-4, ios_base::cur);
 		}
-		else isHeader = false;
-		if(!isHeader){
+		else{
 			fs_in.read(buf_pkg[curPkgIdx].data, 16);
 			PkgTime = catoi(buf_pkg[curPkgIdx].data);
 
@@ -130,38 +113,44 @@ int main(int argc, char** argv){
 			else isValid = false;
 
 			if (isValid){  //last packetage is valid
-				/*write last packetage data*/
-				if (buf_pkg[lastPkgIdx].size)
-				{
-					if (buf_pkg[lastPkgIdx].size + outBuf.size > MaxBufSize)
-					{
-						cout << "write" << endl;
-						fs_out.write(outBuf.data, outBuf.size);
-						outBuf.size = 0;  //reset outBuf
-					}
-					memcpy_s(outBuf.data + outBuf.size, MaxBufSize - outBuf.size, buf_pkg[lastPkgIdx].data, buf_pkg[lastPkgIdx].size);
-					outBuf.size += buf_pkg[lastPkgIdx].size;
-					buf_pkg[lastPkgIdx].size = 0;
-				}
-				/*write last packetage data*/
-
-				/*store size of packet*/
+				/*store size of packetage*/
 				buf_pkg[curPkgIdx].size = catoi(buf_pkg[curPkgIdx].data + 8);
-				/*store size of packet*/
-				if (buf_pkg[curPkgIdx].size > MaxPkgBytes || buf_pkg[curPkgIdx].size <= 0) isValid = false; // current paceket is not valid
-				else
-				{
-					/*read packet data*/
-					fs_in.read(buf_pkg[curPkgIdx].data + 16, buf_pkg[curPkgIdx].size);
-					buf_pkg[curPkgIdx].size += 16;
-					/*read packet data*/
+				/*store size of packetage*/
+				if (buf_pkg[curPkgIdx].size > MaxPkgBytes) isValid = false;
+			}
+			if (isValid) //Pass packet size check
+			{
+				/*read packetage data*/
+				fs_in.read(buf_pkg[curPkgIdx].data + 16, buf_pkg[curPkgIdx].size);
+				buf_pkg[curPkgIdx].size += 16;
+				/*read packetage data*/
 
-					/*swap idx of buffer*/
-					tmp = curPkgIdx;
-					curPkgIdx = lastPkgIdx;
-					lastPkgIdx = tmp;
-					/*swap idx of buffer*/
+				/*write last packetage data*/
+				outBuf.write(buf_pkg[lastPkgIdx].data, buf_pkg[lastPkgIdx].size);
+				if (static_cast<long long>(outBuf.tellp()) > outBufMaxPos)
+				{
+					outBufMaxPos = static_cast<long long>(outBuf.tellp());
 				}
+				else if (static_cast<long long>(outBuf.tellp()) == -1)
+				{
+					cout << "outBufMaxPos: " << outBufMaxPos << endl;
+					system("pause");
+				}
+
+				if (outBuf.tellp() >= 0x40000000 - MaxPkgBytes) // 1GB
+				{
+					cout << "write" << endl;
+					fs_out << outBuf.rdbuf();
+					outBuf.str("");
+					outBuf.clear();
+				}
+				/*write last packetage data*/
+
+				/*swap idx of buffer*/
+				tmp = curPkgIdx;
+				curPkgIdx = lastPkgIdx;
+				lastPkgIdx = tmp;
+				/*swap idx of buffer*/
 			}
 			if (!isValid)
 			{
@@ -170,6 +159,7 @@ int main(int argc, char** argv){
 				fs_in.seekg(-buf_pkg[lastPkgIdx].size - 15, ios_base::cur);
 
 				/*search correct packetage byte by byte*/
+				int tmpflag = 0;
 
 				/*Let PkgTime be invalid.
 				If packet is invalid because of its size, original PkgTime was valid*/
@@ -191,13 +181,12 @@ int main(int argc, char** argv){
 	mytime = clock() - mytime;
 	cout << "Repair pacp: " << mytime << " miniseconds." << endl;
 	cout << "Number of deleted headers: " << headercount << endl;
-	cout << "Number of broken packet: " << invalidPConuter << endl;
 
 
 	mytime = clock();
 
 	if (headercount || isBroken){
-		fs_out.write(outBuf.data, outBuf.size);
+		fs_out << outBuf.rdbuf();
 		fs_out.close();
 #ifdef _MSC_VER
 		wstring originFileName, newFileName;
